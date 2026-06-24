@@ -26,10 +26,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         await init_all_databases()
         logger.info("✅ 数据库连接初始化成功")
     except Exception as e:
-        logger.error(f"❌ 数据库初始化失败: {e}")
-        # 根据配置决定是否继续启动
-        if not settings.DEBUG:
-            raise
+        logger.warning(f"⚠️ 数据库初始化失败 (服务仍可运行): {e}")
+        # 数据库连接失败不阻止启动，使用降级模式
 
     yield
 
@@ -45,8 +43,8 @@ app = FastAPI(
     description="基于知识图谱的佛学智能问答系统",
     version=settings.APP_VERSION,
     lifespan=lifespan,
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 
