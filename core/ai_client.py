@@ -240,6 +240,67 @@ class OpenAIClient(BaseAIClient):
         return [item.embedding for item in response.data]
 
 
+class LiteLLMClient(BaseAIClient):
+    """LiteLLM/Smart Router 客户端 - 用于惠能 Agent"""
+
+    def __init__(
+        self,
+        base_url: str = "http://192.168.50.217:4100/v1",
+        api_key: str = "sk-router",
+        model: str = "L1R-deepseek-reasoning",
+    ):
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model = model
+        self.client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+        )
+
+    async def chat(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> str:
+        """发送聊天请求"""
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+        return response.choices[0].message.content or ""
+
+    async def chat_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> AsyncGenerator[str, None]:
+        """发送流式聊天请求"""
+        stream = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+            **kwargs
+        )
+
+        async for chunk in stream:
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+    async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """获取文本向量 - 通过本地 Ollama"""
+        from core.embedding import embed_texts
+        return await embed_texts(texts)
+
+
 class AIClientFactory:
     """AI客户端工厂"""
 

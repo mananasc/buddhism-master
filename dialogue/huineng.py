@@ -31,7 +31,14 @@ class HuinengAgent:
     """
 
     def __init__(self):
-        self.ai_client = get_ai_client()
+        # 惠能通过 Smart Router 使用 L1R (DeepSeek Reasoning)
+        # Smart Router: http://192.168.50.217:4100/v1 (Mac mini)
+        from core.ai_client import LiteLLMClient
+        self.ai_client = LiteLLMClient(
+            base_url="http://192.168.50.217:4100/v1",
+            api_key="sk-router",
+            model="L1R-deepseek-reasoning",
+        )
         self.system_prompt = self._load_system_prompt()
         self.api_importer = APIImporter()
         self.sutra_parser = SutraParser()
@@ -126,16 +133,43 @@ class HuinengAgent:
 
     # ============ Deerpark 导入功能 ============
 
+    # 优先导入的经典（包含高僧注疏）
+    PRIORITY_SUTRAS = [
+        # 般若系
+        {"id": "T0251", "name": "心经", "category": "般若"},
+        {"id": "T0235", "name": "金刚经", "category": "般若"},
+        {"id": "T0220", "name": "大般若经", "category": "般若"},
+        {"id": "T1509", "name": "大智度论", "category": "般若注疏"},  # 龙树菩萨造
+
+        # 禅宗系
+        {"id": "T2007", "name": "六祖坛经", "category": "禅宗"},
+        {"id": "T0671", "name": "楞伽经", "category": "禅宗"},
+
+        # 净土系
+        {"id": "T0366", "name": "阿弥陀经", "category": "净土"},
+        {"id": "T0360", "name": "无量寿经", "category": "净土"},
+
+        # 阿含系（原始佛教）
+        {"id": "T0100", "name": "杂阿含经", "category": "阿含"},
+        {"id": "T0026", "name": "中阿含经", "category": "阿含"},
+        {"id": "T0001", "name": "长阿含经", "category": "阿含"},
+        {"id": "T0125", "name": "增一阿含经", "category": "阿含"},
+
+        # 中观/唯识论典
+        {"id": "T1564", "name": "中论", "category": "论典"},  # 龙树菩萨
+        {"id": "T1570", "name": "十二门论", "category": "论典"},
+    ]
+
     async def import_from_deerpark(
         self,
         sutra_ids: Optional[List[str]] = None,
-        limit: int = 1,
+        limit: int = 10,
     ) -> Dict[str, Any]:
         """
         从 Deerpark 导入经典
 
         Args:
-            sutra_ids: 指定经典ID列表，None则自动选择
+            sutra_ids: 指定经典ID列表，None则按优先级导入
             limit: 导入数量限制
 
         Returns:
@@ -143,24 +177,19 @@ class HuinengAgent:
         """
         logger.info(f"开始从 Deerpark 导入经典...")
 
-        # 默认优先导入的经典
-        priority_sutras = sutra_ids or [
-            # 心经 (T0251)
-            "T0251",
-            # 杂阿含经 (T0100)
-            "T0100",
-            # 中阿含经 (T0026)
-            "T0026",
-        ]
+        if sutra_ids:
+            to_import = [{"id": sid, "name": sid, "category": "custom"} for sid in sutra_ids]
+        else:
+            to_import = self.PRIORITY_SUTRAS[:limit]
 
         results = []
-        for sutra_id in priority_sutras[:limit]:
+        for sutra in to_import:
             try:
-                result = await self._import_single_sutra(sutra_id)
+                result = await self._import_single_sutra(sutra)
                 results.append(result)
             except Exception as e:
-                logger.error(f"导入 {sutra_id} 失败: {e}")
-                results.append({"sutra_id": sutra_id, "success": False, "error": str(e)})
+                logger.error(f"导入 {sutra['id']} 失败: {e}")
+                results.append({"sutra_id": sutra["id"], "success": False, "error": str(e)})
 
         return {
             "imported": len([r for r in results if r.get("success")]),
@@ -168,21 +197,30 @@ class HuinengAgent:
             "results": results,
         }
 
-    async def _import_single_sutra(self, sutra_id: str) -> Dict[str, Any]:
-        """导入单个经典"""
-        logger.info(f"导入经典: {sutra_id}")
+    async def _import_single_sutra(self, sutra_info: Dict) -> Dict[str, Any]:
+        """导入单个经典（包括注疏）"""
+        sutra_id = sutra_info["id"]
+        sutra_name = sutra_info.get("name", sutra_id)
+        category = sutra_info.get("category", "unknown")
+
+        logger.info(f"导入经典: {sutra_name} ({sutra_id}) - {category}")
 
         # 从 Deerpark 获取
         sutra_data = await self.api_importer.fetch_sutra(sutra_id)
 
         if not sutra_data:
-            return {"sutra_id": sutra_id, "success": False, "error": "Not found"}
+            return {"sutra_id": sutra_id, "name": sutra_name, "success": False, "error": "Not found"}
 
-        # 解析
-        # TODO: 实际解析和保存逻辑
+        # TODO: 解析并保存到知识库
+        # 1. 解析经文内容
+        # 2. 提取章节
+        # 3. 生成 embedding
+        # 4. 保存到索引
 
         return {
             "sutra_id": sutra_id,
+            "name": sutra_name,
+            "category": category,
             "success": True,
             "title": sutra_data.get("title", "Unknown"),
         }
@@ -259,15 +297,17 @@ class HuinengAgent:
         """
         每日学习任务
 
-        自动从 Deerpark 导入新经典，扩充知识库
+        本地 embedding 免费，尽量多导入：
+        - 经典原文
+        - 高僧解读/注疏
         """
         logger.info("执行每日学习任务...")
 
-        # 检查今天是否已经学习过
-        # TODO: 记录学习历史
+        # 导入多个经典 + 解读（本地免费，多导入）
+        import_result = await self.import_from_deerpark(limit=10)
 
-        # 导入新经典
-        import_result = await self.import_from_deerpark(limit=1)
+        # 导入高僧解读（TODO: 从 Deerpark 或其他源获取）
+        # commentary_result = await self.import_commentaries()
 
         return {
             "task": "daily_learning",

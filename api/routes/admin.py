@@ -152,14 +152,47 @@ async def huineng_daily_task():
 @router.get("/stats")
 async def get_stats():
     """获取系统统计信息"""
-    # TODO: 实现统计查询
+    import json
+    from pathlib import Path
+    from core.config import settings
+
+    # 读取索引文件统计
+    index_path = Path(settings.processed_data_dir) / "embeddings_index.json"
+    index_stats = {"total": 0, "by_type": {}}
+
+    if index_path.exists():
+        with open(index_path, "r", encoding="utf-8") as f:
+            index = json.load(f)
+            index_stats["total"] = len(index)
+
+            # 按类型统计
+            for item in index:
+                item_type = item.get("type", "unknown")
+                index_stats["by_type"][item_type] = index_stats["by_type"].get(item_type, 0) + 1
+
+    # 读取原始数据统计
+    raw_dir = Path(settings.raw_data_dir)
+    raw_stats = {"sutras": 0, "concepts": 0, "files": []}
+
+    if raw_dir.exists():
+        for f in raw_dir.glob("*.json"):
+            raw_stats["files"].append(f.name)
+            if "sutra" in f.name or "diamond" in f.name:
+                raw_stats["sutras"] += 1
+            elif "concept" in f.name:
+                raw_stats["concepts"] += 1
+
     return {
-        "sutras": 0,
-        "concepts": 0,
-        "figures": 0,
-        "quotes": 0,
-        "graph_nodes": 0,
-        "graph_edges": 0,
+        "index": index_stats,
+        "raw_data": raw_stats,
+        "embedding": {
+            "provider": "Ollama bge-m3 (Windows 4090)",
+            "dimension": 1024,
+        },
+        "agent": {
+            "name": "惠能",
+            "model": "L1R-deepseek-reasoning (via Smart Router)",
+        },
     }
 
 
