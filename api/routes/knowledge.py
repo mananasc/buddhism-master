@@ -1,137 +1,77 @@
 """
 佛学大师项目 - 知识库路由
+简化为通用查询接口
 """
-from typing import List, Optional
-
-from fastapi import APIRouter, HTTPException, Query
-
-from api.models import (
-    Sutra,
-    Concept,
-    Figure,
-    School,
-    MasterQuote,
-    APIResponse,
-    PaginatedResponse,
-)
+from fastapi import APIRouter, Query
 
 router = APIRouter()
 
 
-# ============ 经典查询 ============
-
-@router.get("/sutra", response_model=List[Sutra])
-async def list_sutras(
-    school: Optional[str] = Query(None, description="宗派筛选"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-):
-    """获取经典列表"""
-    # TODO: 实现数据库查询
-    return []
-
-
-@router.get("/sutra/{sutra_id}", response_model=Sutra)
-async def get_sutra(sutra_id: str):
-    """获取经典详情"""
-    # TODO: 实现数据库查询
-    raise HTTPException(status_code=404, detail="Sutra not found")
-
-
-# ============ 概念查询 ============
-
-@router.get("/concept", response_model=List[Concept])
-async def list_concepts(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-):
-    """获取概念列表"""
-    # TODO: 实现数据库查询
-    return []
-
-
-@router.get("/concept/{concept_name}", response_model=Concept)
-async def get_concept(concept_name: str):
-    """获取概念详情"""
-    # TODO: 实现数据库查询
-    raise HTTPException(status_code=404, detail="Concept not found")
-
-
-# ============ 人物查询 ============
-
-@router.get("/figure", response_model=List[Figure])
-async def list_figures(
-    school: Optional[str] = Query(None, description="宗派筛选"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-):
-    """获取人物列表"""
-    # TODO: 实现数据库查询
-    return []
-
-
-@router.get("/figure/{figure_id}", response_model=Figure)
-async def get_figure(figure_id: str):
-    """获取人物详情"""
-    # TODO: 实现数据库查询
-    raise HTTPException(status_code=404, detail="Figure not found")
-
-
-# ============ 宗派查询 ============
-
-@router.get("/school", response_model=List[School])
-async def list_schools():
-    """获取宗派列表"""
-    # TODO: 实现数据库查询
-    return []
-
-
-@router.get("/school/{school_id}", response_model=School)
-async def get_school(school_id: str):
-    """获取宗派详情"""
-    # TODO: 实现数据库查询
-    raise HTTPException(status_code=404, detail="School not found")
-
-
-# ============ 大师开示查询 ============
-
-@router.get("/quote", response_model=List[MasterQuote])
-async def list_quotes(
-    master: Optional[str] = Query(None, description="大师筛选"),
-    topic: Optional[str] = Query(None, description="主题筛选"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-):
-    """获取大师开示列表"""
-    # TODO: 实现数据库查询
-    return []
-
-
-@router.get("/quote/{quote_id}", response_model=MasterQuote)
-async def get_quote(quote_id: str):
-    """获取开示详情"""
-    # TODO: 实现数据库查询
-    raise HTTPException(status_code=404, detail="Quote not found")
-
-
-# ============ 搜索接口 ============
-
 @router.get("/search")
-async def search_knowledge(
-    q: str = Query(..., description="搜索关键词", min_length=1),
-    type: Optional[str] = Query(None, description="类型筛选: sutra/concept/figure/quote"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+async def search(
+    q: str = Query(..., description="搜索查询", min_length=1),
+    top_k: int = Query(5, ge=1, le=20, description="返回结果数量"),
+    threshold: float = Query(0.5, ge=0.0, le=1.0, description="相似度阈值"),
 ):
     """
-    知识库搜索
+    通用知识搜索
 
-    支持关键词搜索和类型筛选
+    统一入口，支持搜索经典、概念、人物、开示等所有内容。
+    内部自动进行语义检索。
+
+    示例:
+    - /search?q=空性
+    - /search?q=金刚经第三品
+    - /search?q=应无所住而生其心
     """
-    # TODO: 实现搜索逻辑
+    from dialogue.retriever.semantic_search import SemanticSearch
+
+    try:
+        searcher = SemanticSearch()
+        results = await searcher.search(
+            query=q,
+            top_k=top_k,
+            threshold=threshold,
+        )
+
+        return {
+            "success": True,
+            "query": q,
+            "results": results,
+            "total": len(results),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "query": q,
+            "results": [],
+            "total": 0,
+            "error": str(e),
+        }
+
+
+@router.get("/ask")
+async def ask(
+    q: str = Query(..., description="佛学问题", min_length=1),
+):
+    """
+    佛学问答
+
+    基于知识库回答问题，会检索相关内容并生成回答。
+
+    示例:
+    - /ask?q=什么是般若？
+    - /ask?q=金刚经和心经有什么关系？
+    """
+    # TODO: 集成对话引擎
+    # 1. 语义检索相关知识
+    # 2. 构建 prompt
+    # 3. 调用 AI 生成回答
+    # 4. 标注出处
+
     return {
-        "query": q,
-        "type": type,
-        "results": [],
-        "total": 0,
+        "success": True,
+        "question": q,
+        "answer": "功能开发中...",
+        "sources": [],
     }
