@@ -85,6 +85,18 @@ async def ask(
             retrieved_knowledge=knowledge,
         )
 
+        # 3. 知识沉淀（如果有价值）
+        if result.get("should_save"):
+            # 后台保存，不阻塞响应
+            import asyncio
+            asyncio.create_task(
+                agent.save_conversation_to_kb(
+                    question=q,
+                    answer=result["answer"],
+                    sources=result.get("sources", []),
+                )
+            )
+
         return {
             "success": True,
             "question": q,
@@ -97,6 +109,7 @@ async def ask(
                 }
                 for s in result.get("sources", [])
             ],
+            "saved_to_kb": result.get("should_save", False),
         }
     except Exception as e:
         return {

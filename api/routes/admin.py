@@ -109,6 +109,44 @@ async def fetch_from_deerpark(
     return APIResponse(success=True, message="Fetch completed")
 
 
+# ============ 惠能 Agent 管理 ============
+
+@router.post("/huineng/learn")
+async def huineng_learn(limit: int = 1):
+    """
+    触发惠能学习任务
+
+    从 Deerpark 导入新经典，扩充知识库
+    """
+    from dialogue.huineng import get_huineng_agent
+
+    agent = get_huineng_agent()
+    result = await agent.import_from_deerpark(limit=limit)
+
+    return {
+        "success": True,
+        "message": "Learning task completed",
+        "result": result,
+    }
+
+
+@router.post("/huineng/daily-task")
+async def huineng_daily_task():
+    """
+    触发惠能每日学习任务
+    """
+    from dialogue.huineng import get_huineng_agent
+
+    agent = get_huineng_agent()
+    result = await agent.daily_learning_task()
+
+    return {
+        "success": True,
+        "message": "Daily task completed",
+        "result": result,
+    }
+
+
 # ============ 系统管理 ============
 
 @router.get("/stats")
