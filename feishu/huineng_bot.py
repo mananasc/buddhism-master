@@ -1,7 +1,7 @@
 """
-惠能飞书 Bot - 独立佛学问答 Bot
+惠能飞书 Bot - 长连接模式（不需要 webhook/公网）
 
-权限最小化：仅接收消息 + 发送回复
+使用飞书 SDK 的长连接模式，和 SEELE/OpenClaw 一样。
 """
 import sys
 from pathlib import Path
@@ -11,16 +11,14 @@ import asyncio
 import json
 from typing import Optional, Dict, Any
 
-import httpx
 from loguru import logger
 
-from core.config import settings
 from dialogue.huineng import get_huineng_agent
 from dialogue.retriever.semantic_search import SemanticSearch
 
 
 class HuinengFeishuBot:
-    """惠能飞书 Bot"""
+    """惠能飞书 Bot - 长连接模式"""
 
     def __init__(
         self,
@@ -29,92 +27,102 @@ class HuinengFeishuBot:
     ):
         self.app_id = app_id
         self.app_secret = app_secret
-        self.base_url = "https://open.feishu.cn/open-apis"
-        self.tenant_access_token: Optional[str] = None
-        self.token_expire_time: int = 0
 
         self.huineng = get_huineng_agent()
         self.searcher = SemanticSearch()
 
-    async def get_tenant_access_token(self) -> str:
-        """获取 tenant_access_token"""
-        import time
+        # 飞书 SDK
+        self.client = None
 
-        if self.tenant_access_token and time.time() < self.token_expire_time:
-            return self.tenant_access_token
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/auth/v3/tenant_access_token/internal",
-                json={
-                    "app_id": self.app_id,
-                    "app_secret": self.app_secret,
-                }
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            self.tenant_access_token = data["tenant_access_token"]
-            self.token_expire_time = time.time() + data["expire"] - 60  # 提前60秒刷新
-
-            logger.info("获取 tenant_access_token 成功")
-            return self.tenant_access_token
-
-    async def send_message(self, chat_id: str, text: str, msg_type: str = "text"):
-        """发送消息"""
-        token = await self.get_tenant_access_token()
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/im/v1/messages",
-                params={"receive_id_type": "chat_id"},
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "receive_id": chat_id,
-                    "msg_type": msg_type,
-                    "content": json.dumps({"text": text}) if msg_type == "text" else text,
-                }
-            )
-            response.raise_for_status()
-            result = response.json()
-
-            if result.get("code") != 0:
-                logger.error(f"发送消息失败: {result}")
-            else:
-                logger.info(f"消息已发送到 {chat_id}")
-
-            return result
-
-    async def handle_message(self, message: Dict[str, Any]) -> str:
-        """处理用户消息"""
-        # 提取用户问题
-        content = message.get("content", "{}")
+    def init_sdk(self):
+        """初始化飞书 SDK"""
         try:
-            content_data = json.loads(content)
-            text = content_data.get("text", "")
-        except:
-            text = ""
+            import lark_oapi as lark
+            from lark_oapi.adapter.flask import *
 
-        # 去除 @bot 的部分
-        if text.startswith("@"):
-            parts = text.split(" ", 1)
-            text = parts[1] if len(parts) > 1 else ""
+            # 创建客户端（长连接模式）
+            self.client = lark.ws.Client(
+                app_id=self.app_id,
+                app_secret=self.app_secret,
+                event_handler=self._create_event_handler(),
+                log_level=lark.LogLevel.INFO,
+            )
 
-        text = text.strip()
-        if not text:
-            return "阿弥陀佛，请问有什么佛学问题想讨论？"
+            logger.info("飞书 SDK 初始化成功（长连接模式）")
+            return True
 
-        logger.info(f"收到问题: {text}")
+        except ImportError:
+            logger.error("请安装飞书 SDK: pip install lark-oapi")
+            return False
+        except Exception as e:
+            logger.error(f"飞书 SDK 初始化失败: {e}")
+            return False
 
-        # 1. 先搜索知识库
-        knowledge = await self.searcher.search(query=text, top_k=3, threshold=0.4)
+    def _create_event_handler(self):
+        """创建事件处理器"""
+        import lark_oapi as lark
+        from lark_oapi.api.im.v1 import *
+
+        handler = lark.EventDispatcherHandlerBuilder("", "")
+
+        # 注册消息接收事件
+        handler.register(
+            lark.EventType.IM_MESSAGE_RECEIVE_V1,
+            self._on_message_receive
+        )
+
+        return handler
+
+    async def _on_message_receive(self, data: lark.im.v1.P2ImMessageReceiveV1) -> None:
+        """处理收到的消息"""
+        try:
+            event = data.event
+            message = event.message
+            chat_id = message.chat_id
+            message_type = message.message_type
+            content = message.content
+
+            # 只处理文本消息
+            if message_type != "text":
+                logger.info(f"忽略非文本消息: {message_type}")
+                return
+
+            # 解析文本
+            try:
+                content_data = json.loads(content)
+                text = content_data.get("text", "")
+            except:
+                text = ""
+
+            # 去除 @bot 的部分
+            mentions = event.message.mentions or []
+            for mention in mentions:
+                text = text.replace(mention.key, "").strip()
+
+            text = text.strip()
+            if not text:
+                return
+
+            logger.info(f"收到问题: {text}")
+
+            # 调用惠能回答
+            reply = await self._handle_question(text)
+
+            # 发送回复
+            if reply:
+                await self._send_reply(chat_id, reply)
+
+        except Exception as e:
+            logger.error(f"处理消息失败: {e}")
+
+    async def _handle_question(self, question: str) -> str:
+        """处理用户问题"""
+        # 1. 搜索知识库
+        knowledge = await self.searcher.search(query=question, top_k=3, threshold=0.4)
 
         # 2. 调用惠能回答
         result = await self.huineng.ask(
-            question=text,
+            question=question,
             retrieved_knowledge=knowledge,
         )
 
@@ -122,61 +130,64 @@ class HuinengFeishuBot:
         if result.get("should_save"):
             asyncio.create_task(
                 self.huineng.save_conversation_to_kb(
-                    question=text,
+                    question=question,
                     answer=result["answer"],
                 )
             )
 
         return result["answer"]
 
-    async def run_webhook(self, host: str = "0.0.0.0", port: int = 9000):
-        """运行 webhook 服务器（用于接收飞书事件）"""
-        from fastapi import FastAPI, Request
-        import uvicorn
+    async def _send_reply(self, chat_id: str, text: str):
+        """发送回复"""
+        if not self.client:
+            logger.error("飞书客户端未初始化")
+            return
 
-        app = FastAPI()
+        try:
+            import lark_oapi as lark
+            from lark_oapi.api.im.v1 import *
 
-        @app.post("/webhook")
-        async def webhook(request: Request):
-            body = await request.json()
-            logger.debug(f"收到 webhook: {body}")
+            # 创建请求
+            request = CreateMessageRequest.builder() \
+                .receive_id_type("chat_id") \
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(chat_id)
+                    .msg_type("text")
+                    .content(json.dumps({"text": text}))
+                    .build()
+                ).build()
 
-            # 验证 challenge
-            if "challenge" in body:
-                return {"challenge": body["challenge"]}
+            # 发送
+            response = await self.client.im.v1.message.acreate(request)
 
-            # 处理消息事件
-            header = body.get("header", {})
-            event = body.get("event", {})
+            if not response.success():
+                logger.error(f"发送消息失败: {response.code} - {response.msg}")
+            else:
+                logger.info(f"消息已发送到 {chat_id}")
 
-            if header.get("event_type") == "im.message.receive_v1":
-                message = event.get("message", {})
-                chat_id = message.get("chat_id", "")
+        except Exception as e:
+            logger.error(f"发送回复失败: {e}")
 
-                # 处理消息
-                reply = await self.handle_message(message)
+    def run(self):
+        """运行 Bot（长连接模式）"""
+        if not self.init_sdk():
+            logger.error("SDK 初始化失败，无法启动")
+            return
 
-                # 发送回复
-                if chat_id and reply:
-                    await self.send_message(chat_id, reply)
+        logger.info("=" * 50)
+        logger.info("惠能飞书 Bot 启动中...")
+        logger.info(f"App ID: {self.app_id}")
+        logger.info("模式: 长连接 (无需公网)")
+        logger.info("=" * 50)
 
-            return {"code": 0}
-
-        logger.info(f"启动飞书 webhook 服务器: {host}:{port}")
-        uvicorn.run(app, host=host, port=port)
+        # 启动长连接
+        self.client.start()
 
 
 async def test_bot():
-    """测试 Bot"""
+    """测试 Bot（不连接飞书）"""
     bot = HuinengFeishuBot()
-
-    # 测试获取 token
-    try:
-        token = await bot.get_tenant_access_token()
-        logger.info(f"✅ Token 获取成功: {token[:20]}...")
-    except Exception as e:
-        logger.error(f"❌ Token 获取失败: {e}")
-        return
 
     # 测试回答问题
     test_questions = [
@@ -186,17 +197,17 @@ async def test_bot():
 
     for q in test_questions:
         logger.info(f"测试问题: {q}")
-        reply = await bot.handle_message({"content": json.dumps({"text": q})})
+        reply = await bot._handle_question(q)
         logger.info(f"回答: {reply[:100]}...")
+        print("-" * 40)
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="惠能飞书 Bot")
+    parser = argparse.ArgumentParser(description="惠能飞书 Bot（长连接模式）")
     parser.add_argument("--test", action="store_true", help="运行测试")
-    parser.add_argument("--webhook", action="store_true", help="启动 webhook 服务器")
-    parser.add_argument("--port", type=int, default=9000, help="webhook 端口")
+    parser.add_argument("--run", action="store_true", help="启动 Bot")
 
     args = parser.parse_args()
 
@@ -204,9 +215,11 @@ if __name__ == "__main__":
 
     if args.test:
         asyncio.run(test_bot())
-    elif args.webhook:
-        asyncio.run(bot.run_webhook(port=args.port))
+    elif args.run:
+        bot.run()
     else:
         print("用法:")
-        print("  python -m feishu.huineng_bot --test    # 运行测试")
-        print("  python -m feishu.huineng_bot --webhook # 启动 webhook 服务器")
+        print("  python -m feishu.huineng_bot --test  # 运行测试")
+        print("  python -m feishu.huineng_bot --run   # 启动 Bot（长连接）")
+        print()
+        print("不需要公网 IP，不需要 webhook！")
