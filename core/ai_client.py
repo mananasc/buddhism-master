@@ -263,7 +263,7 @@ class AIClientFactory:
     @classmethod
     async def close_all(cls):
         """关闭所有客户端"""
-            cls._instances.clear()
+        cls._instances.clear()
 
 
 # 全局AI客户端
