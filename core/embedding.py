@@ -1,63 +1,35 @@
 """
-佛学大师项目 - 本地 Embedding 服务
-使用本地 GPU (RTX 4090) 运行 embedding 模型
+佛学大师项目 - 远程 Embedding 服务
+调用 Windows 4090 上的 Ollama (bge-m3)
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from typing import List, Optional
 import asyncio
-from functools import lru_cache
 
-import numpy as np
+import httpx
 from loguru import logger
 
+from core.config import settings
 
-class LocalEmbeddingService:
+
+class RemoteEmbeddingService:
     """
-    本地 Embedding 服务
+    远程 Embedding 服务
 
-    使用 sentence-transformers 在本地 GPU 上运行
-    推荐模型: BAAI/bge-large-zh-v1.5 (中文优化)
+    调用 Windows 4090 上的 Ollama bge-m3
     """
 
     def __init__(
         self,
-        model_name: str = "BAAI/bge-large-zh-v1.5",
-        device: str = "cuda",  # 使用 GPU
-        batch_size: int = 32,
+        base_url: str = "http://192.168.50.94:11434",  # Windows 4090
+        model: str = "bge-m3",
     ):
-        self.model_name = model_name
-        self.device = device
-        self.batch_size = batch_size
-        self.model = None
-        self.dimension = 1024  # bge-large 的向量维度
-
-    def load_model(self):
-        """加载模型（首次调用时）"""
-        if self.model is not None:
-            return
-
-        try:
-            from sentence_transformers import SentenceTransformer
-
-            logger.info(f"加载 Embedding 模型: {self.model_name}")
-            logger.info(f"设备: {self.device}")
-
-            self.model = SentenceTransformer(
-                self.model_name,
-                device=self.device,
-            )
-
-            # 获取实际维度
-            test_embedding = self.model.encode(["测试"])
-            self.dimension = len(test_embedding[0])
-
-            logger.info(f"✅ 模型加载成功，向量维度: {self.dimension}")
-
-        except ImportError:
-            logger.error("请安装 sentence-transformers: pip install sentence-transformers")
-            raise
-        except Exception as e:
-            logger.error(f"模型加载失败: {e}")
-            raise
+        self.base_url = base_url
+        self.model = model
+        self.dimension = 1024  # bge-m3 输出维度
 
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """
@@ -69,25 +41,21 @@ class LocalEmbeddingService:
         Returns:
             List[List[float]]: 向量列表
         """
-        # 在线程池中运行 CPU/GPU 密集任务
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._embed_sync, texts)
-
-    def _embed_sync(self, texts: List[str]) -> List[List[float]]:
-        """同步嵌入（内部使用）"""
-        self.load_model()
-
-        # 分批处理
-        all_embeddings = []
-        for i in range(0, len(texts), self.batch_size):
-            batch = texts[i:i + self.batch_size]
-            embeddings = self.model.encode(
-                batch,
-                normalize_embeddings=True,  # L2 归一化
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Ollama embedding API
+            response = await client.post(
+                f"{self.base_url}/api/embed",
+                json={
+                    "model": self.model,
+                    "input": texts,
+                }
             )
-            all_embeddings.extend(embeddings.tolist())
+            response.raise_for_status()
+            result = response.json()
 
-        return all_embeddings
+            embeddings = result.get("embeddings", [])
+            logger.debug(f"Embedding {len(texts)} texts -> {len(embeddings)} vectors")
+            return embeddings
 
     async def embed_query(self, query: str) -> List[float]:
         """
@@ -99,18 +67,8 @@ class LocalEmbeddingService:
         Returns:
             List[float]: 查询向量
         """
-        self.load_model()
-
-        # 查询时使用不同的处理
-        loop = asyncio.get_event_loop()
-        embedding = await loop.run_in_executor(
-            None,
-            lambda: self.model.encode(
-                [query],
-                normalize_embeddings=True,
-            )[0].tolist()
-        )
-        return embedding
+        embeddings = await self.embed_texts([query])
+        return embeddings[0] if embeddings else []
 
     def compute_similarity(
         self,
@@ -119,7 +77,7 @@ class LocalEmbeddingService:
         top_k: int = 5,
     ) -> List[tuple]:
         """
-        计算相似度并返回 top-k
+        计算相似度并返回 top-k (余弦相似度)
 
         Args:
             query_embedding: 查询向量
@@ -129,27 +87,47 @@ class LocalEmbeddingService:
         Returns:
             List[tuple]: (索引, 相似度) 列表
         """
+        import numpy as np
+
         query = np.array(query_embedding)
         docs = np.array(doc_embeddings)
 
-        # 余弦相似度（已归一化，直接点积）
-        similarities = docs @ query
+        # 余弦相似度
+        similarities = docs @ query / (
+            np.linalg.norm(docs, axis=1) * np.linalg.norm(query) + 1e-8
+        )
 
         # 获取 top-k
         top_indices = np.argsort(similarities)[::-1][:top_k]
 
         return [(int(idx), float(similarities[idx])) for idx in top_indices]
 
+    async def test_connection(self) -> bool:
+        """测试连接"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.base_url}/api/tags")
+                response.raise_for_status()
+                models = response.json().get("models", [])
+                logger.info(f"✅ Ollama 连接成功: {self.base_url}")
+                logger.info(f"   可用模型: {[m['name'] for m in models]}")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Ollama 连接失败: {e}")
+            return False
 
-# 全局实例（延迟加载）
-_embedding_service: Optional[LocalEmbeddingService] = None
+
+# 全局实例
+_embedding_service: Optional[RemoteEmbeddingService] = None
 
 
-def get_embedding_service() -> LocalEmbeddingService:
+def get_embedding_service() -> RemoteEmbeddingService:
     """获取 embedding 服务实例"""
     global _embedding_service
     if _embedding_service is None:
-        _embedding_service = LocalEmbeddingService()
+        # 从配置读取 Ollama 地址
+        ollama_url = getattr(settings, "OLLAMA_BASE_URL", "http://192.168.50.94:11434")
+        _embedding_service = RemoteEmbeddingService(base_url=ollama_url)
     return _embedding_service
 
 
@@ -167,9 +145,17 @@ async def embed_query(query: str) -> List[float]:
 
 async def test_embedding():
     """测试 embedding 服务"""
-    logger.info("测试本地 Embedding 服务...")
+    logger.info("测试远程 Embedding 服务...")
 
     service = get_embedding_service()
+
+    # 测试连接
+    if not await service.test_connection():
+        logger.error("无法连接到 Ollama，请检查:")
+        logger.error("  1. Windows 4090 是否开机")
+        logger.error("  2. Ollama 是否运行")
+        logger.error("  3. 网络是否可达")
+        return
 
     # 测试文本
     texts = [

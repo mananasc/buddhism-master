@@ -98,6 +98,16 @@ class Settings(BaseSettings):
         description="Embedding 向量维度"
     )
 
+    # Ollama 配置 (远程调用 Windows 4090)
+    OLLAMA_BASE_URL: str = Field(
+        default="http://192.168.50.94:11434",
+        description="Ollama 服务地址 (Windows 4090)"
+    )
+    OLLAMA_EMBEDDING_MODEL: str = Field(
+        default="bge-m3",
+        description="Ollama Embedding 模型"
+    )
+
     # Deerpark API配置
     DEERPARK_API_BASE: str = Field(
         default="https://deerpark.app/api/v1",

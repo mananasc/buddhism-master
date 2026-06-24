@@ -27,9 +27,7 @@ pymilvus==2.3.6
 # 向量数据库 - Qdrant (备选)
 qdrant-client==1.7.0
 
-# 本地 Embedding (使用 GPU)
-sentence-transformers==2.5.1
-torch>=2.0.0
+# Embedding 通过远程 Ollama 调用，无需本地安装
 
 # 文本处理
 jieba==0.42.1
