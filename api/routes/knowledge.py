@@ -53,25 +53,55 @@ async def search(
 @router.get("/ask")
 async def ask(
     q: str = Query(..., description="佛学问题", min_length=1),
+    top_k: int = Query(3, ge=1, le=10, description="检索相关知识数量"),
 ):
     """
-    佛学问答
+    佛学问答 - 惠能大师回答
 
-    基于知识库回答问题，会检索相关内容并生成回答。
+    基于知识库回答佛学问题。
+    会先检索相关知识，然后由惠能 Agent 生成回答。
 
     示例:
     - /ask?q=什么是般若？
     - /ask?q=金刚经和心经有什么关系？
+    - /ask?q=如何理解'色即是空'？
     """
-    # TODO: 集成对话引擎
-    # 1. 语义检索相关知识
-    # 2. 构建 prompt
-    # 3. 调用 AI 生成回答
-    # 4. 标注出处
+    from dialogue.retriever.semantic_search import SemanticSearch
+    from dialogue.huineng import get_huineng_agent
 
-    return {
-        "success": True,
-        "question": q,
-        "answer": "功能开发中...",
-        "sources": [],
-    }
+    try:
+        # 1. 检索相关知识
+        searcher = SemanticSearch()
+        knowledge = await searcher.search(
+            query=q,
+            top_k=top_k,
+            threshold=0.4,  # 降低阈值，获取更多参考
+        )
+
+        # 2. 调用惠能 Agent 回答
+        agent = get_huineng_agent()
+        result = await agent.ask(
+            question=q,
+            retrieved_knowledge=knowledge,
+        )
+
+        return {
+            "success": True,
+            "question": q,
+            "answer": result["answer"],
+            "sources": [
+                {
+                    "text": s.get("text", "")[:200],
+                    "title": s.get("title", s.get("name", "")),
+                    "score": s.get("score", 0),
+                }
+                for s in result.get("sources", [])
+            ],
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "question": q,
+            "answer": f"抱歉，回答时出现错误: {str(e)}",
+            "sources": [],
+        }
