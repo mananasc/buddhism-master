@@ -27,6 +27,10 @@ pymilvus==2.3.6
 # 向量数据库 - Qdrant (备选)
 qdrant-client==1.7.0
 
+# 本地 Embedding (使用 GPU)
+sentence-transformers==2.5.1
+torch>=2.0.0
+
 # 文本处理
 jieba==0.42.1
 numpy==1.26.4

@@ -80,6 +80,24 @@ class Settings(BaseSettings):
     # 向量数据库选择: "milvus" 或 "qdrant"
     VECTOR_DB_PROVIDER: str = Field(default="milvus", description="向量数据库提供商")
 
+    # 本地 Embedding 配置 (使用本地 GPU)
+    EMBEDDING_MODEL: str = Field(
+        default="BAAI/bge-large-zh-v1.5",
+        description="Embedding 模型名称"
+    )
+    EMBEDDING_DEVICE: str = Field(
+        default="cuda",
+        description="Embedding 设备: cuda/cpu"
+    )
+    EMBEDDING_BATCH_SIZE: int = Field(
+        default=32,
+        description="Embedding 批处理大小"
+    )
+    EMBEDDING_DIMENSION: int = Field(
+        default=1024,
+        description="Embedding 向量维度"
+    )
+
     # Deerpark API配置
     DEERPARK_API_BASE: str = Field(
         default="https://deerpark.app/api/v1",
