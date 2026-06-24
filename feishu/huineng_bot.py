@@ -38,7 +38,6 @@ class HuinengFeishuBot:
         """初始化飞书 SDK"""
         try:
             import lark_oapi as lark
-            from lark_oapi.adapter.flask import *
 
             # 创建客户端（长连接模式）
             self.client = lark.ws.Client(
@@ -61,7 +60,6 @@ class HuinengFeishuBot:
     def _create_event_handler(self):
         """创建事件处理器"""
         import lark_oapi as lark
-        from lark_oapi.api.im.v1 import *
 
         handler = lark.EventDispatcherHandlerBuilder("", "")
 
@@ -73,7 +71,7 @@ class HuinengFeishuBot:
 
         return handler
 
-    async def _on_message_receive(self, data: lark.im.v1.P2ImMessageReceiveV1) -> None:
+    async def _on_message_receive(self, data) -> None:
         """处理收到的消息"""
         try:
             event = data.event
@@ -95,7 +93,7 @@ class HuinengFeishuBot:
                 text = ""
 
             # 去除 @bot 的部分
-            mentions = event.message.mentions or []
+            mentions = getattr(event.message, 'mentions', None) or []
             for mention in mentions:
                 text = text.replace(mention.key, "").strip()
 
@@ -145,7 +143,7 @@ class HuinengFeishuBot:
 
         try:
             import lark_oapi as lark
-            from lark_oapi.api.im.v1 import *
+            from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
             # 创建请求
             request = CreateMessageRequest.builder() \
