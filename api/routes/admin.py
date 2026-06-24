@@ -1,0 +1,136 @@
+"""
+佛学大师项目 - 管理路由
+"""
+from fastapi import APIRouter, HTTPException
+
+from api.models import (
+    ImportRequest,
+    ImportResponse,
+    BuildGraphRequest,
+    BuildGraphResponse,
+    Sutra,
+    Concept,
+    MasterQuote,
+    APIResponse,
+)
+
+router = APIRouter()
+
+
+# ============ 数据导入 ============
+
+@router.post("/sutra", response_model=APIResponse)
+async def add_sutra(sutra: Sutra):
+    """添加经典"""
+    # TODO: 实现经典添加
+    return APIResponse(success=True, message="Sutra added")
+
+
+@router.post("/concept", response_model=APIResponse)
+async def add_concept(concept: Concept):
+    """添加概念"""
+    # TODO: 实现概念添加
+    return APIResponse(success=True, message="Concept added")
+
+
+@router.post("/master-quote", response_model=APIResponse)
+async def add_master_quote(quote: MasterQuote):
+    """添加大师开示"""
+    # TODO: 实现开示添加
+    return APIResponse(success=True, message="Quote added")
+
+
+@router.post("/import", response_model=ImportResponse)
+async def import_data(request: ImportRequest):
+    """
+    批量导入数据
+
+    支持导入经典、概念、大师开示等
+    """
+    # TODO: 实现批量导入
+    return ImportResponse(
+        success=True,
+        message="Import completed",
+        imported_count=0,
+    )
+
+
+# ============ 知识图谱管理 ============
+
+@router.post("/build-graph", response_model=BuildGraphResponse)
+async def build_graph(request: BuildGraphRequest):
+    """
+    构建/重建知识图谱
+
+    从数据库数据构建Neo4j知识图谱
+    """
+    # TODO: 实现图谱构建
+    return BuildGraphResponse(
+        success=True,
+        message="Graph built successfully",
+        nodes_created=0,
+        edges_created=0,
+    )
+
+
+@router.post("/sync-graph")
+async def sync_graph():
+    """
+    同步知识图谱
+
+    增量同步新增数据到图谱
+    """
+    # TODO: 实现图谱同步
+    return APIResponse(success=True, message="Graph synced")
+
+
+@router.delete("/graph")
+async def clear_graph():
+    """清空知识图谱"""
+    # TODO: 实现图谱清空
+    return APIResponse(success=True, message="Graph cleared")
+
+
+# ============ 数据源管理 ============
+
+@router.post("/fetch-deerpark")
+async def fetch_from_deerpark(
+    sutra_id: str = None,
+    limit: int = 10,
+):
+    """
+    从Deerpark API获取数据
+
+    参数:
+    - sutra_id: 指定经典ID，不指定则获取列表
+    - limit: 获取数量限制
+    """
+    # TODO: 实现Deerpark数据获取
+    return APIResponse(success=True, message="Fetch completed")
+
+
+# ============ 系统管理 ============
+
+@router.get("/stats")
+async def get_stats():
+    """获取系统统计信息"""
+    # TODO: 实现统计查询
+    return {
+        "sutras": 0,
+        "concepts": 0,
+        "figures": 0,
+        "quotes": 0,
+        "graph_nodes": 0,
+        "graph_edges": 0,
+    }
+
+
+@router.post("/reset")
+async def reset_system():
+    """
+    重置系统
+
+    清空所有数据，谨慎使用！
+    """
+    # TODO: 实现系统重置
+    return APIResponse(success=True, message="System reset")
