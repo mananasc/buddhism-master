@@ -295,25 +295,136 @@ class HuinengAgent:
 
     async def daily_learning_task(self) -> Dict[str, Any]:
         """
-        每日学习任务
+        每日学习任务 - 智能学习
 
-        本地 embedding 免费，尽量多导入：
-        - 经典原文
-        - 高僧解读/注疏
+        不是盲目导入，而是：
+        1. 惠能自己提出佛学问题（基于知识框架的空白点）
+        2. 判断需要哪些经典/注疏来回答
+        3. 有针对性地导入
+        4. 自己回答，验证是否理解
+        5. 有价值的问答才入库
         """
-        logger.info("执行每日学习任务...")
+        logger.info("执行每日智能学习任务...")
 
-        # 导入多个经典 + 解读（本地免费，多导入）
-        import_result = await self.import_from_deerpark(limit=10)
+        # 1. 惠能提出今日学习问题
+        questions = await self._generate_learning_questions()
 
-        # 导入高僧解读（TODO: 从 Deerpark 或其他源获取）
-        # commentary_result = await self.import_commentaries()
+        # 2. 判断需要哪些文档
+        needed_docs = await self._identify_needed_documents(questions)
+
+        # 3. 导入需要的文档
+        import_results = []
+        for doc in needed_docs[:5]:  # 每天最多导入5个
+            result = await self._import_single_sutra(doc)
+            import_results.append(result)
+
+        # 4. 惠能尝试回答自己的问题
+        qa_pairs = []
+        for q in questions[:3]:  # 每天回答3个问题
+            answer_result = await self.ask(q)
+            qa_pairs.append({
+                "question": q,
+                "answer": answer_result["answer"],
+                "should_save": answer_result.get("should_save", False),
+            })
+
+            # 5. 有价值的入库
+            if answer_result.get("should_save"):
+                await self.save_conversation_to_kb(
+                    question=q,
+                    answer=answer_result["answer"],
+                )
 
         return {
             "task": "daily_learning",
-            "result": import_result,
+            "questions_generated": len(questions),
+            "documents_identified": len(needed_docs),
+            "documents_imported": len([r for r in import_results if r.get("success")]),
+            "qa_pairs_created": len(qa_pairs),
+            "qa_pairs_saved": len([qa for qa in qa_pairs if qa.get("should_save")]),
             "timestamp": datetime.now().isoformat(),
         }
+
+    async def _generate_learning_questions(self) -> List[str]:
+        """
+        惠能自己提出学习问题
+
+        基于佛学知识框架，找出需要深入理解的问题
+        """
+        prompt = """作为佛学大师惠能，请根据以下知识框架，提出3-5个你认为需要深入学习的佛学问题：
+
+知识框架：
+- 般若系：空性、般若、无住、中道
+- 禅宗系：佛性、顿悟、无念、见性成佛
+- 净土系：念佛、往生、极乐世界
+- 阿含系：四谛、八正道、十二因缘、无我
+- 论典：中观、唯识、如来藏
+
+请提出你认为目前理解不够深入、需要进一步学习经典来回答的问题。
+格式：每行一个问题，简洁明了。"""
+
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            response = await self.ai_client.chat(messages, max_tokens=500)
+            questions = [q.strip() for q in response.strip().split("\n") if q.strip()]
+            logger.info(f"生成学习问题: {questions}")
+            return questions[:5]
+        except Exception as e:
+            logger.error(f"生成问题失败: {e}")
+            return ["什么是般若？", "如何理解空性？"]
+
+    async def _identify_needed_documents(self, questions: List[str]) -> List[Dict]:
+        """
+        根据问题判断需要哪些文档
+        """
+        prompt = f"""根据以下佛学问题，判断需要学习哪些经典或注疏：
+
+问题：
+{chr(10).join(f'- {q}' for q in questions)}
+
+请从以下列表中选择最相关的经典（按优先级排序）：
+- T0251 心经（般若核心）
+- T0235 金刚经（破除执着）
+- T1509 大智度论（般若注疏，龙树菩萨）
+- T1564 中论（中观哲学，龙树菩萨）
+- T2007 六祖坛经（禅宗核心）
+- T0671 楞伽经（禅宗/唯识）
+- T0100 杂阿含经（原始佛教）
+- T0366 阿弥陀经（净土）
+
+格式：每行一个，格式为 "T编号 经名 理由"
+最多选择5个。"""
+
+        messages = [
+            {"role": "system", "content": "你是佛学学习计划制定专家。"},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            response = await self.ai_client.chat(messages, max_tokens=500)
+            lines = [l.strip() for l in response.strip().split("\n") if l.strip()]
+
+            docs = []
+            for line in lines[:5]:
+                # 解析 "T0251 心经 理由"
+                parts = line.split()
+                if len(parts) >= 2 and parts[0].startswith("T"):
+                    docs.append({
+                        "id": parts[0],
+                        "name": parts[1],
+                        "category": "auto_selected",
+                        "reason": " ".join(parts[2:]) if len(parts) > 2 else "",
+                    })
+
+            logger.info(f"识别需要的文档: {docs}")
+            return docs
+        except Exception as e:
+            logger.error(f"识别文档失败: {e}")
+            return self.PRIORITY_SUTRAS[:5]
 
 
 # 全局实例
